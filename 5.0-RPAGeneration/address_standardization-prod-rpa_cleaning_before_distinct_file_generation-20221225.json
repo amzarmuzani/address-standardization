@@ -1,0 +1,70 @@
+{
+  "jobConfig": {
+    "name": "address_standardization-prod-rpa_cleaning_before_distinct_file_generation",
+    "description": "",
+    "role": "arn:aws:iam::741993363917:role/AWSGlueServiceRole",
+    "command": "glueetl",
+    "version": "2.0",
+    "workerType": "G.2X",
+    "numberOfWorkers": 5,
+    "maxCapacity": 10,
+    "maxRetries": 0,
+    "timeout": 60,
+    "maxConcurrentRuns": 10,
+    "security": "none",
+    "scriptName": "address_standardization-prod-rpa_cleaning_before_distinct_file_generation",
+    "scriptLocation": "s3://astro-groupdata-prod-config/address_standardization/python_scripts/",
+    "language": "python-3",
+    "jobParameters": [
+      {
+        "key": "--additional-python-modules",
+        "value": "awswrangler==2.12.1",
+        "existing": false
+      },
+      {
+        "key": "--isp_new_std_path",
+        "value": "s3://astro-groupdata-prod-pipeline/address_standardization/tm_new_standardized/TM_New_Standardized.csv.gz",
+        "existing": false
+      },
+      {
+        "key": "--job_name",
+        "value": "address_standardization-prod-rpa_cleaning_before_distinct_file_generation",
+        "existing": false
+      },
+      {
+        "key": "--temp_isp_corrected_save_path",
+        "value": "s3://astro-groupdata-prod-pipeline/address_standardization/uams_temp_final/",
+        "existing": false
+      }
+    ],
+    "tags": [
+      {
+        "key": "Name",
+        "value": "address_standardization-prod-rpa_cleaning_before_distinct_file_generation",
+        "existing": false
+      },
+      {
+        "key": "Project",
+        "value": "Address_standardization",
+        "existing": false
+      },
+      {
+        "key": "Technical_Owner",
+        "value": "Amzar",
+        "existing": false
+      }
+    ],
+    "jobMode": "DEVELOPER_MODE",
+    "useGlueProvidedDataLakeLibs": false,
+    "developerMode": true,
+    "connectionsList": [],
+    "temporaryDirectory": "s3://astro-groupdata-prod-config/address_standardization/python_scripts",
+    "etlAutoTuning": false,
+    "pythonPath": "s3://astro-groupdata-prod-config/address_standardization/python_library/awswrangler-2.12.1-py3-none-any.whl",
+    "bookmark": "job-bookmark-disable",
+    "flexExecution": false,
+    "minFlexWorkers": null
+  },
+  "hasBeenSaved": false,
+  "script": "#!/usr/bin/env python\n# coding: utf-8\n\n# ### P1/P2 Mapping\n#      1. Run similarity using fuzzy wuzzy and map P1 MDU\n#      2. Use unmapped account + address from #1 and map P1 SDU\n#      3. Use unmapped account + address from #2 and map P2 SDU\n\n# In[1]:\n\n\nimport pandas as pd\nimport numpy as np\nimport re\nimport resource\nimport awswrangler as wr\n# For similarity\nimport time\nimport sys\nfrom awsglue.utils import getResolvedOptions\nfrom datetime import datetime\nargs = getResolvedOptions(sys.argv,\n                          ['job_name',\n                           'isp_new_std_path',\n                           'temp_isp_corrected_save_path'])\n\n\nisp_new_std_path = args['isp_new_std_path'] #new std path\ntemp_isp_corrected_save_path = args['temp_isp_corrected_save_path']\n\nimport pandas as pd\n\n## Amzar 18/11/2022 -> added a datetime key for tracking file creation\ncurr_date = str(pd.datetime.today().strftime('%Y%m%d'))\n\n# In[ ]:\nprint('reading tm')\n\n# isp_corrected = wr.s3.read_csv(path = isp_new_std_path, usecols = ['HouseNo','Combined_Building','STD_CITY','BuildingName','StreetType','StreetName','Postcode','City','State','Section','ServiceType','Street_1'])\nisp_corrected = wr.s3.read_csv(path = isp_new_std_path, usecols = ['HouseNo','Combined_Building','STD_CITY','BuildingName','StreetType','StreetName','Postcode','City','State','Section','ServiceType','Street_1'], compression='gzip', dtype=str) ## 18/11/22: added gzip compression n dtype=str\n\n# astro_corrected = pd.read_csv('Astro_New_Standardised.csv')\n#astro_corrected = pd.read_csv('astro_new_standardized.csv', usecols = ['service_add_objid', 'ACCOUNT_NO','HOUSE_NO', 'AREA', 'STD_CITY',\n                                #'ASTRO_STATE', 'POSTCODE', 'Combined_Building','Street_1',\n                                 #'Street_2','Standard_Building_Name','Source','match'], engine='python', error_bad_lines=False)\n\n\nprint('this is tm corrected: ', isp_corrected.shape)\n\n# Fix house no for isp_corrected\nisp_corrected[\"HouseNo\"] = isp_corrected['HouseNo'].str.replace('nan ','', case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace('[,.]','', case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"[\",'', )\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"]\",\"\")\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"'\",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"NO. \",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"NO.\",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"NO\",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"LOT\",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"UNIT\",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\",\",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"\\.\",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"BLOCK\",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"BLOK\",\"\", case = False)\nisp_corrected[\"HouseNo\"] = isp_corrected[\"HouseNo\"].str.replace(\"BLK\",\"\", case = False)\n\n# Fix HouseNo that are converted to date\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"JAN-\",\"01-\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-JAN\",\"-01\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace('FEB-','02-', case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace('-FEB','-02', case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"MAR-\",'03-', case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-MAR\",\"-03\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"APR-\",\"04-\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-APR\",\"-04\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"MAY-\",\"05-\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-MAY\",\"-05\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"JUN-\",\"06-\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-JUN\",\"-06\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace('JUL-','07-', case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace('-JUL','-07', case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"AUG-\",'08-', case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-AUG\",\"-08\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"SEP-\",\"09-\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-SEP\",\"-09\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"OCT-\",\"10-\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-OCT\",\"-10\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"NOV-\",\"11-\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-NOV\",\"-11\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"DEC-\",\"12-\", case = False)\nisp_corrected['HouseNo'] = isp_corrected['HouseNo'].str.replace(\"-DEC\",\"-12\", case = False)\n\nisp_corrected['TM_HOUSE_NO1']= isp_corrected['HouseNo'].str.pad(width=10)\n\n###P1 MDU ======================================================= P1 MDU ===============\n\n# Add new column in isp_corrected -- G_Condo + G_City = HNUM_STRT_TM\nisp_corrected[\"HNUM_STRT_TM\"] = isp_corrected[\"Combined_Building\"].map(str) + \" ,\" + isp_corrected[\"STD_CITY\"].map(str)\n\n# Clean HNUM_STRT_TM column\nisp_corrected[\"HNUM_STRT_TM\"] = isp_corrected['HNUM_STRT_TM'].str.replace('nan ','', case = False)\nisp_corrected[\"HNUM_STRT_TM\"] = isp_corrected['HNUM_STRT_TM'].str.replace('[,.]','', case = False)\nisp_corrected[\"HNUM_STRT_TM\"] = isp_corrected[\"HNUM_STRT_TM\"].str.replace(\" \",\"\")\nisp_corrected[\"HNUM_STRT_TM\"] = isp_corrected[\"HNUM_STRT_TM\"].str.replace(\",\",\"\")\nisp_corrected[\"HNUM_STRT_TM\"] = isp_corrected[\"HNUM_STRT_TM\"].str.replace(\"\\.\",\"\")\n\n# Capitalize HNUM_STRT_TM\nisp_corrected['HNUM_STRT_TM'] = isp_corrected['HNUM_STRT_TM'].str.upper() \n\n# Remove nulls in HNUM_STRT and HNUM_STRT_TM\nisp_corrected = isp_corrected[isp_corrected.HNUM_STRT_TM.notnull()]\n\nprint(isp_corrected.shape)\n\n## revision - 31/5/22 - fakhrul - need to separate this process as it consumes too much memory\n# wr.s3.to_csv(df = isp_corrected, path = temp_isp_corrected_save_path + 'temp_isp_corrected_before_rpa_distinct_20221013.csv', index = False) ## --> 13/10/2022 Amzar: added \"_20221013\" to filename\nwr.s3.to_csv(df = isp_corrected, path = temp_isp_corrected_save_path + 'temp_isp_corrected_before_rpa_distinct.csv.gz', index = False, compression='gzip') # 18/11/22: changed back to this to allow for automation. 22/11/22: added gzip compression\nwr.s3.to_csv(df = isp_corrected, path = temp_isp_corrected_save_path + 'historical_folder/temp_isp_corrected_before_rpa_distinct_' + str(curr_date) + '.csv.gz', index = False, compression='gzip') # 18/11/22: added historic folder & curr_date to have a record of bases created. 22/11/22: added gzip compression\n\nusage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\nprint('[debug] memory usage is (Megabytes):')\nprint(usage)\n"
+}
